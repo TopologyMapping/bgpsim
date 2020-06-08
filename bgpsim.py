@@ -6,7 +6,7 @@ import copy
 import dataclasses
 import enum
 import logging
-from typing import Mapping, Sequence, Tuple, Union
+from typing import Callable, Mapping, Sequence, Tuple, Union
 
 import networkx as nx
 
@@ -61,6 +61,33 @@ class Relationship(enum.IntEnum):
         >>> assert Relationship.P2P == Relationship.P2P.reversed()
         """
         return Relationship(-1 * self.value)
+
+
+class InferenceCallback(enum.Enum):
+    """Callback hooks available in the inference algorithm
+
+    START_RELATIONSHIP_PHASE is called whenever the algorithm starts
+    processing relationships of a given type (class Relationship).
+    Relationships are processed in order of preference (P2C->P2P->C2P).
+
+    callback(pref: Relationship) -> ()
+
+    VISIT_EDGE is called whenever the algorithm processes an edge. Some
+    edges are ignored in the inference process (e.g., edges where the AS
+    importing routes is announcing the prefix).
+
+    callback(exporter: int, importer: int, pref: Relationship) -> ()
+
+    NEIGHBOR_ANNOUNCE is called whenever we start a new phase and
+    initialize routes at neighbors of origins. Edges from origins to
+    neighbors are not considered by VISIT_EDGE.
+
+    callback(origin: int, neighbor: int, pref: Relationship, path: List[int]) -> ()
+    """
+
+    START_RELATIONSHIP_PHASE = "start-relationship-phase"
+    NEIGHBOR_ANNOUNCE = "neighbor-announce"
+    VISIT_EDGE = "visit-edge"
 
 
 @dataclasses.dataclass
@@ -130,6 +157,7 @@ class ASGraph:
         self.g = nx.DiGraph()
         self.workqueue = WorkQueue()
         self.announce = None
+        self.callbacks = dict()
 
     def add_peering(self, source: int, sink: int, relationship: Relationship) -> ():
         """Add nodes and edges corresponding to a peering relationship."""
@@ -145,6 +173,9 @@ class ASGraph:
         self.g[source][sink][EDGE_REL] = Relationship(relationship)
         self.g.add_edge(sink, source)
         self.g[sink][source][EDGE_REL] = relationship.reversed()
+
+    def set_callback(self, when: InferenceCallback, func: Callable) -> ():
+        self.callbacks[when] = func
 
     def check_announcement(self, announce: Announcement) -> ():
         """Check all relationships exist and that there are no bogus poisonings."""
@@ -184,10 +215,16 @@ class ASGraph:
         self.announce = announce
 
         for pref in [PathPref.CUSTOMER, PathPref.PEER, PathPref.PROVIDER]:
+            if InferenceCallback.START_RELATIONSHIP_PHASE in self.callbacks:
+                self.callbacks[InferenceCallback.START_RELATIONSHIP_PHASE](pref)
             self.make_announcements(pref)
             edge = self.workqueue.get(pref)
             while edge:
                 exporter, importer = edge
+                if InferenceCallback.VISIT_EDGE in self.callbacks:
+                    self.callbacks[InferenceCallback.VISIT_EDGE](
+                        exporter, importer, pref
+                    )
                 if importer in announce.source2neighbor2path:
                     # Do not import route at sources.
                     edge = self.workqueue.get(pref)
@@ -207,6 +244,11 @@ class ASGraph:
             for nei, aspath in nei2aspath.items():
                 if PathPref.from_relationship(self, src, nei) != pref:
                     continue
+                if InferenceCallback.NEIGHBOR_ANNOUNCE in self.callbacks:
+                    announce_path = self.announce.source2neighbor2path[src][nei]
+                    self.callbacks[InferenceCallback.NEIGHBOR_ANNOUNCE](
+                        src, nei, pref, announce_path
+                    )
                 nei2len2srcs[nei][len(aspath)].append(src)
 
         for nei, len2srcs in nei2len2srcs.items():
