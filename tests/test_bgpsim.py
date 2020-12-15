@@ -33,7 +33,7 @@ def _make_graph_implicit_withdrawal():
     # 1--------\---\
     # |    2---3   4
     # |    5   |   6
-    # |    7   8---/X
+    # |    7   8---/
     # |    9
     # 10---/
     graph = ASGraph()
@@ -143,6 +143,49 @@ def _make_graph_peer_peer_relationships():
     graph.add_peering(1, 3, Relationship.P2P)
     graph.add_peering(3, 5, Relationship.P2P)
     graph.add_peering(5, 7, Relationship.P2P)
+    return graph
+
+
+def _check_origin(_exporter, paths, origin):
+    return [p for p in paths if p[-1] == origin]
+
+
+def _make_graph_peer_lock():
+    # Test propagation of hijacked routes through when using peer lock:
+    # ASes 2 and 3 peer with AS1, ASes 4 and 5 are providers of AS1.
+    # ASes 2 and 4 have peer lock configured with AS1. ASes 6 and 7 are
+    # customers of ASes 2-5. AS7 will hijack the prefix. AS 8 peers with
+    # ASes 2-5 and AS9 is a provider of ASes 2-5.
+    #   ----9----
+    #  /   / \   \
+    # |   4   5   |  --\
+    # |  | \ / |  |  --\
+    # 2--+--1--+--3----8
+    # |  |     |  |  --/
+    #  \-6     7-/
+    graph = ASGraph()
+    graph.add_peering(1, 2, Relationship.P2P)
+    graph.add_peering(1, 3, Relationship.P2P)
+    graph.add_peering(1, 4, Relationship.C2P)
+    graph.add_peering(1, 5, Relationship.C2P)
+    graph.add_peering(6, 2, Relationship.C2P)
+    graph.add_peering(6, 3, Relationship.C2P)
+    graph.add_peering(6, 4, Relationship.C2P)
+    graph.add_peering(6, 5, Relationship.C2P)
+    graph.add_peering(7, 2, Relationship.C2P)
+    graph.add_peering(7, 3, Relationship.C2P)
+    graph.add_peering(7, 4, Relationship.C2P)
+    graph.add_peering(7, 5, Relationship.C2P)
+    graph.add_peering(8, 2, Relationship.P2P)
+    graph.add_peering(8, 3, Relationship.P2P)
+    graph.add_peering(8, 4, Relationship.P2P)
+    graph.add_peering(8, 5, Relationship.P2P)
+    graph.add_peering(9, 2, Relationship.P2C)
+    graph.add_peering(9, 3, Relationship.P2C)
+    graph.add_peering(9, 4, Relationship.P2C)
+    graph.add_peering(9, 5, Relationship.P2C)
+    graph.set_import_filter(2, _check_origin, 1)
+    graph.set_import_filter(4, _check_origin, 1)
     return graph
 
 
@@ -555,6 +598,37 @@ class TestASGraph(unittest.TestCase):
 
             self.assertCountEqual(graph.g.nodes[5][NODE_BEST_PATHS], as5_paths)
             self.assertEqual(graph.g.nodes[5][NODE_PATH_PREF], best_pref)
+
+    def test_peer_lock(self):
+        graph = _make_graph_peer_lock()
+
+        announce = Announcement.make_anycast_announcement(graph, [1, 7])
+        graph.infer_paths(announce)
+
+        self.assertCountEqual(graph.g.nodes[2][NODE_BEST_PATHS], [(1,)])
+        self.assertEqual(graph.g.nodes[2][NODE_PATH_PREF], PathPref.PEER)
+        self.assertCountEqual(graph.g.nodes[4][NODE_BEST_PATHS], [(1,)])
+        self.assertEqual(graph.g.nodes[4][NODE_PATH_PREF], PathPref.CUSTOMER)
+
+        self.assertCountEqual(graph.g.nodes[3][NODE_BEST_PATHS], [(7,)])
+        self.assertEqual(graph.g.nodes[3][NODE_PATH_PREF], PathPref.CUSTOMER)
+        self.assertCountEqual(graph.g.nodes[5][NODE_BEST_PATHS], [(7,), (1,)])
+        self.assertEqual(graph.g.nodes[5][NODE_PATH_PREF], PathPref.CUSTOMER)
+
+        self.assertCountEqual(
+            graph.g.nodes[6][NODE_BEST_PATHS], [(2, 1), (4, 1), (3, 7), (5, 7), (5, 1)]
+        )
+        self.assertEqual(graph.g.nodes[6][NODE_PATH_PREF], PathPref.PROVIDER)
+
+        self.assertCountEqual(
+            graph.g.nodes[8][NODE_BEST_PATHS], [(4, 1), (3, 7), (5, 7), (5, 1)]
+        )
+        self.assertEqual(graph.g.nodes[8][NODE_PATH_PREF], PathPref.PEER)
+
+        self.assertCountEqual(
+            graph.g.nodes[9][NODE_BEST_PATHS], [(4, 1), (3, 7), (5, 7), (5, 1)]
+        )
+        self.assertEqual(graph.g.nodes[9][NODE_PATH_PREF], PathPref.CUSTOMER)
 
 
 def workqueue_random_get(self, pref):

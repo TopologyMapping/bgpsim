@@ -14,6 +14,7 @@ import networkx as nx
 NODE_PATH_PREF = "path-pref"
 NODE_BEST_PATHS = "best-paths"
 NODE_PATH_LEN = "path-len"
+NODE_IMPORT_FILTER = "import-filter"
 EDGE_REL = "edge-attr-relationship"
 
 
@@ -165,14 +166,30 @@ class ASGraph:
             self.g.add_node(source)
             self.g.nodes[source][NODE_BEST_PATHS] = list()
             self.g.nodes[source][NODE_PATH_PREF] = PathPref.UNKNOWN
+            self.g.nodes[source][NODE_IMPORT_FILTER] = None
         if sink not in self.g:
             self.g.add_node(sink)
             self.g.nodes[sink][NODE_BEST_PATHS] = list()
             self.g.nodes[sink][NODE_PATH_PREF] = PathPref.UNKNOWN
+            self.g.nodes[sink][NODE_IMPORT_FILTER] = None
         self.g.add_edge(source, sink)
         self.g[source][sink][EDGE_REL] = Relationship(relationship)
         self.g.add_edge(sink, source)
         self.g[sink][source][EDGE_REL] = relationship.reversed()
+
+    def set_import_filter(self, asn: int, func: Callable, data=None) -> ():
+        """Set import filter for an AS.
+
+        The filter function receives the exporter ASN and the exported
+        AS-paths tied for best. The exported AS-paths already include
+        the exporter's ASN. It should return the set of AS-paths that
+        are actually imported (not discarded). The data variable will be
+        passed to the filter function.
+
+        filter(exporter: int, paths: List[Tuple[int]], data) ->
+                List[Tuple[int]]
+        """
+        self.g.nodes[asn][NODE_IMPORT_FILTER] = (func, data)
 
     def set_callback(self, when: InferenceCallback, func: Callable) -> ():
         self.callbacks[when] = func
@@ -272,8 +289,9 @@ class ASGraph:
         arbitrary paths at importer. This is used to handle different announcements to
         different neighbors.
         """
+        node = self.g.nodes[importer]
         new_pref = PathPref.from_relationship(self, exporter, importer)
-        current_pref = self.g.nodes[importer][NODE_PATH_PREF]
+        current_pref = node[NODE_PATH_PREF]
 
         assert current_pref >= new_pref or current_pref == PathPref.UNKNOWN
 
@@ -287,8 +305,13 @@ class ASGraph:
         else:
             exported_paths = self.g.nodes[exporter][NODE_BEST_PATHS]
             new_paths = [(exporter,) + p for p in exported_paths if importer not in p]
-            if not new_paths:
-                return False
+
+        if node[NODE_IMPORT_FILTER] is not None:
+            func, data = node[NODE_IMPORT_FILTER]
+            new_paths = func(exporter, new_paths, data)
+        if not new_paths:
+            return False
+
         new_path_len = len(new_paths[0])
 
         if current_pref == PathPref.UNKNOWN:
@@ -303,7 +326,7 @@ class ASGraph:
 
         if new_path_len == current_path_len:
             self.g.nodes[importer][NODE_BEST_PATHS].extend(new_paths)
-            self.workqueue.check_work(self, importer)
+            assert self.workqueue.check_work(self, importer)
 
         return False
 
