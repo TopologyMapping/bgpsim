@@ -121,7 +121,7 @@ class WorkQueue:
             PathPref.PROVIDER: defaultdict(list),
         }
 
-    def get(self, pref: PathPref) -> Union[None, (int, int)]:
+    def get(self, pref: PathPref) -> Union[None, Tuple[int, int]]:
         """Get the edge exporting the shortest paths with pref."""
         if not self.pref2depth2edge[pref]:
             return None
@@ -131,7 +131,7 @@ class WorkQueue:
             del self.pref2depth2edge[pref][depth]
         return edge
 
-    def add_work(self, graph: ASGraph, exporter: int) -> ():
+    def add_work(self, graph: ASGraph, exporter: int) -> None:
         """Add work to forward paths at importer to downstream ASes"""
         pref = graph.g.nodes[exporter][NODE_PATH_PREF]
         for downstream in graph.g[exporter]:
@@ -160,7 +160,7 @@ class ASGraph:
         self.announce = None
         self.callbacks = dict()
 
-    def add_peering(self, source: int, sink: int, relationship: Relationship) -> ():
+    def add_peering(self, source: int, sink: int, relationship: Relationship) -> None:
         """Add nodes and edges corresponding to a peering relationship."""
         if source not in self.g:
             self.g.add_node(source)
@@ -177,7 +177,7 @@ class ASGraph:
         self.g.add_edge(sink, source)
         self.g[sink][source][EDGE_REL] = relationship.reversed()
 
-    def set_import_filter(self, asn: int, func: Callable, data=None) -> ():
+    def set_import_filter(self, asn: int, func: Callable, data=None) -> None:
         """Set import filter for an AS.
 
         The filter function receives the exporter ASN and the exported
@@ -191,10 +191,10 @@ class ASGraph:
         """
         self.g.nodes[asn][NODE_IMPORT_FILTER] = (func, data)
 
-    def set_callback(self, when: InferenceCallback, func: Callable) -> ():
+    def set_callback(self, when: InferenceCallback, func: Callable) -> None:
         self.callbacks[when] = func
 
-    def check_announcement(self, announce: Announcement) -> ():
+    def check_announcement(self, announce: Announcement) -> None:
         """Check all relationships exist and that there are no bogus poisonings."""
         for source, neighbor2path in announce.source2neighbor2path.items():
             if source not in self.g:
@@ -251,12 +251,12 @@ class ASGraph:
                     self.workqueue.add_work(self, importer)
                 edge = self.workqueue.get(pref)
 
-    def make_announcements(self, pref: PathPref) -> ():
+    def make_announcements(self, pref: PathPref) -> None:
         """Initialize paths with given pref at neighbors according to announcement."""
 
         # We sort the calls to update_paths() by path length as update_paths() does not
         # allow paths to get shorter due to the breadth-first search.
-        nei2len2srcs = defaultdict(lambda: defaultdict(list))
+        nei2len2srcs: Mapping[int, Mapping[int, list[int]]] = defaultdict(lambda: defaultdict(list))
         for src, nei2aspath in self.announce.source2neighbor2path.items():
             for nei, aspath in nei2aspath.items():
                 if PathPref.from_relationship(self, src, nei) != pref:
