@@ -118,8 +118,8 @@ class Announcement:
         src2nei2path: dict[int, dict[int, ASPath]] = {}
         if isinstance(sources, list):
             sources = {asn: 0 for asn in sources}
-        for src in sources:
-            src2nei2path[src] = {nei: () for nei in asgraph.g[src]}
+        for src, prepend in sources.items():
+            src2nei2path[src] = {nei: prepend*(src,) for nei in asgraph.g[src]}
         return Announcement(src2nei2path)
 
 
