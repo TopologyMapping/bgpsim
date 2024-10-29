@@ -363,6 +363,8 @@ class ASGraph:
         graph.g = copy.deepcopy(self.g)
         graph.workqueue = WorkQueue()
         graph.announce = None
+        graph.tier1s = self.tier1s
+        graph.ixps = self.ixps
         return graph
 
     @staticmethod
@@ -370,16 +372,22 @@ class ASGraph:
         def parse_relationship_line(line):
             # <provider-as>|<customer-as>|-1
             # <peer-as>|<peer-as>|0
-            source, sink, rel = line.strip().split("|")
+            source, sink, rel = line.split("|")
             return int(source), int(sink), Relationship(int(rel))
 
         graph = ASGraph()
         cnt = Counter(lines=0, peerings=0)
         with bz2.open(filepath, "rt") as fd:
             for line in fd:
+                line = line.strip()
                 cnt["lines"] += 1
                 if line[0] == "#":
-                    # TODO: store metadata in ASGraph
+                    if line.startswith("# input clique: "):
+                        line = line.replace("# input clique: ", "")
+                        graph.tier1s = set(int(a) for a in line.split())
+                    if line.startswith("# IXP ASes: "):
+                        line = line.replace("# IXP ASes: ", "")
+                        graph.ixps = set(int(a) for a in line.split())
                     continue
                 source, sink, rel = parse_relationship_line(line)
                 graph.add_peering(source, sink, rel)
