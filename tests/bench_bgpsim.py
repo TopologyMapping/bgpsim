@@ -2,7 +2,8 @@ import os
 import random
 import sys
 import timeit
-import urllib
+import urllib.parse
+import urllib.request
 
 sys.path.append(os.getcwd())
 from bgpsim import (
@@ -16,7 +17,7 @@ CAIDA_AS_RELATIONSHIPS_URL = (
 
 
 def random_inference(graph):
-    sources = random.sample(graph.g.nodes, 2)
+    sources = random.sample(sorted(graph.g.nodes), 2)
     announce = Announcement.make_anycast_announcement(graph, sources)
     g1 = graph.clone()
     g1.infer_paths(announce)

@@ -2,11 +2,19 @@
 
 BGP path propagation inference
 
+## Running the tests
+
+We have some tests to check the propagation algorithm in pre-built topologies.  Run with:
+
+```bash
+python3 -m unittest tests/test_bgpsim.py
+```
+
 ## Basic benchmarking
 
 You can check the runtime of random path inferences on CAIDA's January 2020 graph by using the `tests/bench_bgpsim.py` script. It reports 5 averages over 32 full inference runs each. Disabling assertions with `-O` makes the code significantly faster as it is pretty heavy on asserts.
 
-``` {bash}
+```bash
 $ python3 tests/bench_bgpsim.py
 [1065.9921099510975, 1129.7197931839619, 1341.9510222299723, 1212.2649150219513, 1117.318360270001]
 $ python3 -O tests/bench_bgpsim.py

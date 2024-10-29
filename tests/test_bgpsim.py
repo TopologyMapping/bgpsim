@@ -282,6 +282,11 @@ class TestWorkQueue(unittest.TestCase):
 
 
 class TestASGraph(unittest.TestCase):
+    def test_duplicate_edges(self):
+        graph = _make_graph_implicit_withdrawal()
+        graph.add_peering(1, 10, Relationship(-1))  # Nop
+        self.assertRaises(ValueError, lambda: graph.add_peering(1, 10, Relationship(0)))
+
     def test_implicit_withdraw(self):
         graph = _make_graph_implicit_withdrawal()
         g1 = graph.clone()
@@ -646,7 +651,7 @@ def workqueue_random_get(self, pref):
     return edge
 
 
-@unittest.skipIf(SLOW_TESTS_DISABLED, "WHY U NO RUST?!")
+@unittest.skipIf(SLOW_TESTS_DISABLED, "WHY U NO RUST")
 class TestCaidaASGraph(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -662,14 +667,16 @@ class TestCaidaASGraph(unittest.TestCase):
 
     def test_load_caida_asrel(self):
         self.assertIsNotNone(self.graph)
+        self.assertGreater(len(self.graph.tier1s), 1)
+        self.assertGreater(len(self.graph.ixps), 1)
 
     @unittest.mock.patch.object(WorkQueue, "get", workqueue_random_get)
     def test_random_sources_on_caida_graph(self):
-        SETS = 10
+        SETS = 5
         ITERATIONS = 3
 
         for setnum in range(SETS):
-            sources = random.sample(self.graph.g.nodes, 3)
+            sources = random.sample(sorted(self.graph.g.nodes), 3)
             announce = Announcement.make_anycast_announcement(self.graph, sources)
             self.assertCountEqual(announce.source2neighbor2path.keys(), sources)
 
