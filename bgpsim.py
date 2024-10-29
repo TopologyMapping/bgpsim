@@ -18,6 +18,7 @@ NODE_PATH_PREF = "path-pref"
 NODE_BEST_PATHS = "best-paths"
 NODE_PATH_LEN = "path-len"
 NODE_IMPORT_FILTER = "import-filter"
+NODE_HAS_PROVIDER = "has-provider"
 EDGE_REL = "edge-attr-relationship"
 
 
@@ -176,15 +177,21 @@ class ASGraph:
             self.g.nodes[source][NODE_BEST_PATHS] = list()
             self.g.nodes[source][NODE_PATH_PREF] = PathPref.UNKNOWN
             self.g.nodes[source][NODE_IMPORT_FILTER] = None
+            self.g.nodes[source][NODE_HAS_PROVIDER] = False
         if sink not in self.g:
             self.g.add_node(sink)
             self.g.nodes[sink][NODE_BEST_PATHS] = list()
             self.g.nodes[sink][NODE_PATH_PREF] = PathPref.UNKNOWN
             self.g.nodes[sink][NODE_IMPORT_FILTER] = None
+            self.g.nodes[sink][NODE_HAS_PROVIDER] = False
         self.g.add_edge(source, sink)
         self.g[source][sink][EDGE_REL] = Relationship(relationship)
         self.g.add_edge(sink, source)
         self.g[sink][source][EDGE_REL] = relationship.reversed()
+        if relationship == Relationship.C2P:
+            self.g.nodes[source][NODE_HAS_PROVIDER] = True
+        elif relationship == Relationship.P2C:
+            self.g.nodes[sink][NODE_HAS_PROVIDER] = True
 
     def set_import_filter(self, asn: int, func: ImportFilter, data: Any = None) -> None:
         """Set import filter for an AS.
