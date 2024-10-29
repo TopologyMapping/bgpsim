@@ -8,9 +8,12 @@ import enum
 import logging
 import os
 from collections import Counter, defaultdict
+from typing import Any, Callable
 
 import networkx as nx
 
+ASPath = tuple[int, ...]
+ImportFilter = Callable[[int, list[ASPath], Any], list[ASPath]]
 
 NODE_PATH_PREF = "path-pref"
 NODE_BEST_PATHS = "best-paths"
@@ -32,7 +35,7 @@ class PathPref(enum.IntEnum):
     UNKNOWN = 0
 
     @staticmethod
-    def from_relationship(graph: ASGraph, exporter: int, importer: int):
+    def from_relationship(graph: ASGraph, exporter: int, importer: int) -> PathPref:
         """Compute the PathPref at importer given the relationship in the ASGraph."""
         rel = graph.g[importer][exporter][EDGE_REL]
         if rel == Relationship.P2C:
@@ -56,7 +59,7 @@ class Relationship(enum.IntEnum):
     P2P = 0
     P2C = -1
 
-    def reversed(self):
+    def reversed(self) -> Relationship:
         """Get Relationship in the opposite direction of an edge.
 
         >>> assert Relationship.P2C == Relationship.C2P.reversed()
@@ -103,10 +106,12 @@ class Announcement:
     AS-path poisoning.
     """
 
-    source2neighbor2path: Mapping[int, Mapping[int, Tuple[int]]]
+    source2neighbor2path: dict[int, dict[int, ASPath]]
 
     @staticmethod
-    def make_anycast_announcement(asgraph: ASGraph, sources: Sequence[int]):
+    def make_anycast_announcement(
+        asgraph: ASGraph, sources: list[int] | dict[int, int]
+    ) -> Announcement:
         """Make announcement from sources to all neighbors without prepending."""
         src2nei2path = dict()
         for src in sources:
@@ -122,7 +127,7 @@ class WorkQueue:
             PathPref.PROVIDER: defaultdict(list),
         }
 
-    def get(self, pref: PathPref) -> Union[None, Tuple[int, int]]:
+    def get(self, pref: PathPref) -> tuple[int, int] | None:
         """Get the edge exporting the shortest paths with pref."""
         if not self.pref2depth2edge[pref]:
             return None
@@ -158,8 +163,10 @@ class ASGraph:
     def __init__(self):
         self.g = nx.DiGraph()
         self.workqueue = WorkQueue()
-        self.announce = None
-        self.callbacks = dict()
+        self.announce: Announcement | None = None
+        self.callbacks: dict[InferenceCallback, Callable] = {}
+        self.tier1s: set[int] = set()
+        self.ixps: set[int] = set()
 
     def add_peering(self, source: int, sink: int, relationship: Relationship) -> None:
         """Add nodes and edges corresponding to a peering relationship."""
@@ -178,7 +185,7 @@ class ASGraph:
         self.g.add_edge(sink, source)
         self.g[sink][source][EDGE_REL] = relationship.reversed()
 
-    def set_import_filter(self, asn: int, func: Callable, data=None) -> None:
+    def set_import_filter(self, asn: int, func: ImportFilter, data: Any = None) -> None:
         """Set import filter for an AS.
 
         The filter function receives the exporter ASN and the exported
@@ -187,8 +194,7 @@ class ASGraph:
         are actually imported (not discarded). The data variable will be
         passed to the filter function.
 
-        filter(exporter: int, paths: List[Tuple[int]], data) ->
-                List[Tuple[int]]
+        filter(exporter: int, paths: list[ASPath], data) -> list[ASPath]
         """
         self.g.nodes[asn][NODE_IMPORT_FILTER] = (func, data)
 
@@ -257,7 +263,9 @@ class ASGraph:
 
         # We sort the calls to update_paths() by path length as update_paths() does not
         # allow paths to get shorter due to the breadth-first search.
-        nei2len2srcs: Mapping[int, Mapping[int, list[int]]] = defaultdict(lambda: defaultdict(list))
+        nei2len2srcs: dict[int, dict[int, list[int]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
         for src, nei2aspath in self.announce.source2neighbor2path.items():
             for nei, aspath in nei2aspath.items():
                 if PathPref.from_relationship(self, src, nei) != pref:
@@ -277,8 +285,8 @@ class ASGraph:
                 if self.update_paths(src, nei, announce_path):
                     self.workqueue.add_work(self, nei)
 
-    def update_paths(
-        self, exporter: int, importer: int, announce_path: Tuple[int] = None
+    def _update_paths(
+        self, exporter: int, importer: int, announce_path: tuple[int, ...] | None = None
     ) -> bool:
         """Check for new paths or add paths tied for best at importer.
 
@@ -331,7 +339,7 @@ class ASGraph:
 
         return False
 
-    def clone(self):
+    def clone(self) -> ASGraph:
         """Return a deep copy of the current ASGraph."""
         assert self.announce is None
         graph = ASGraph()
@@ -341,7 +349,7 @@ class ASGraph:
         return graph
 
     @staticmethod
-    def read_caida_asrel_graph(filepath):
+    def read_caida_asrel_graph(filepath: str | os.PathLike) -> ASGraph:
         def parse_relationship_line(line):
             # <provider-as>|<customer-as>|-1
             # <peer-as>|<peer-as>|0
