@@ -115,7 +115,9 @@ class Announcement:
         asgraph: ASGraph, sources: list[int] | dict[int, int]
     ) -> Announcement:
         """Make announcement from sources to all neighbors without prepending."""
-        src2nei2path = dict()
+        src2nei2path: dict[int, dict[int, ASPath]] = {}
+        if isinstance(sources, list):
+            sources = {asn: 0 for asn in sources}
         for src in sources:
             src2nei2path[src] = {nei: () for nei in asgraph.g[src]}
         return Announcement(src2nei2path)
@@ -172,15 +174,21 @@ class ASGraph:
 
     def add_peering(self, source: int, sink: int, relationship: Relationship) -> None:
         """Add nodes and edges corresponding to a peering relationship."""
+        assert source != sink
+        data = self.g.get_edge_data(source, sink, None)
+        if data is not None:
+            if data[EDGE_REL] != relationship:
+                raise ValueError("Duplicate edges with different relationships")
+            return
         if source not in self.g:
             self.g.add_node(source)
-            self.g.nodes[source][NODE_BEST_PATHS] = list()
+            self.g.nodes[source][NODE_BEST_PATHS] = []
             self.g.nodes[source][NODE_PATH_PREF] = PathPref.UNKNOWN
             self.g.nodes[source][NODE_IMPORT_FILTER] = None
             self.g.nodes[source][NODE_HAS_PROVIDER] = False
         if sink not in self.g:
             self.g.add_node(sink)
-            self.g.nodes[sink][NODE_BEST_PATHS] = list()
+            self.g.nodes[sink][NODE_BEST_PATHS] = []
             self.g.nodes[sink][NODE_PATH_PREF] = PathPref.UNKNOWN
             self.g.nodes[sink][NODE_IMPORT_FILTER] = None
             self.g.nodes[sink][NODE_HAS_PROVIDER] = False
