@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import bz2
-from collections import defaultdict, Counter
 import copy
 import dataclasses
 import enum
@@ -74,20 +73,22 @@ class InferenceCallback(enum.Enum):
     START_RELATIONSHIP_PHASE is called whenever the algorithm starts
     processing relationships of a given type (class Relationship).
     Relationships are processed in order of preference (P2C->P2P->C2P).
+    Example signature:
 
-    callback(pref: Relationship) -> ()
+    def callback(pref: Relationship) -> None
 
-    VISIT_EDGE is called whenever the algorithm processes an edge. Some
-    edges are ignored in the inference process (e.g., edges where the AS
-    importing routes is announcing the prefix).
+    VISIT_EDGE is called whenever the algorithm processes an edge.  Some
+    edges are not "visited" in the inference process: (i) Edges where
+    the AS importing routes is announcing the prefix; (ii) Edges visited
+    when the origin makes the first announcement to a neighbor (see
+    NeighborAnnounceCallback).  Example signature:
 
-    callback(exporter: int, importer: int, pref: Relationship) -> ()
+    def callback(exporter: int, importer: int, pref: Relationship) -> None
 
-    NEIGHBOR_ANNOUNCE is called whenever we start a new phase and
-    initialize routes at neighbors of origins. Edges from origins to
-    neighbors are not considered by VISIT_EDGE.
+    NeighborAnnounceCallback is called whenever we start a new phase and
+    initialize routes at neighbors of origins.  Example signature:
 
-    callback(origin: int, neighbor: int, pref: Relationship, path: List[int]) -> ()
+    def callback(origin: int, neighbor: int, pref: Relationship, path: ASPath) -> None
     """
 
     START_RELATIONSHIP_PHASE = "start-relationship-phase"
@@ -210,7 +211,7 @@ class ASGraph:
                 if neigh not in self.g[source]:
                     raise ValueError(f"Peering AS{source}-AS{neigh} not in ASGraph")
                 if neigh in path:
-                    raise ValueError(f"Neighbor AS{neigh} poisoned in announcement")
+                    raise ValueError(f"Neighbor AS{neigh} poisoned in announcement from AS{source} with path {path}")
 
     def infer_paths(self, announce: Announcement):
         """Infer all AS-paths tied for best toward announcement sources.
@@ -241,7 +242,7 @@ class ASGraph:
         for pref in [PathPref.CUSTOMER, PathPref.PEER, PathPref.PROVIDER]:
             if InferenceCallback.START_RELATIONSHIP_PHASE in self.callbacks:
                 self.callbacks[InferenceCallback.START_RELATIONSHIP_PHASE](pref)
-            self.make_announcements(pref)
+            self._make_announcements(pref)
             edge = self.workqueue.get(pref)
             while edge:
                 exporter, importer = edge
@@ -254,13 +255,14 @@ class ASGraph:
                     edge = self.workqueue.get(pref)
                     continue
                 assert PathPref.from_relationship(self, exporter, importer) == pref
-                if self.update_paths(exporter, importer):
+                if self._update_paths(exporter, importer):
                     self.workqueue.add_work(self, importer)
                 edge = self.workqueue.get(pref)
 
-    def make_announcements(self, pref: PathPref) -> None:
+    def _make_announcements(self, pref: PathPref) -> None:
         """Initialize paths with given pref at neighbors according to announcement."""
 
+        assert self.announce is not None
         # We sort the calls to update_paths() by path length as update_paths() does not
         # allow paths to get shorter due to the breadth-first search.
         nei2len2srcs: dict[int, dict[int, list[int]]] = defaultdict(
@@ -282,7 +284,7 @@ class ASGraph:
             length = min(len2srcs.keys())
             for src in len2srcs[length]:
                 announce_path = self.announce.source2neighbor2path[src][nei]
-                if self.update_paths(src, nei, announce_path):
+                if self._update_paths(src, nei, announce_path):
                     self.workqueue.add_work(self, nei)
 
     def _update_paths(
